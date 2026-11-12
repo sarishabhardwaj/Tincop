@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from destinations import DESTINATIONS
 from routing import Graph, dijkstra, fare, graph_from_osm, nearest_node
+from trip import plan_trip
 
 ROOT = Path(__file__).resolve().parent
 CACHE = ROOT / "data" / "osm-cache.json"
@@ -136,6 +137,16 @@ def route(body):
     return result
 
 
+def public_trip(body):
+    places = {place['id']:place for place in DESTINATIONS}
+    start, end = body.get('start'), body.get('end')
+    if start not in places or end not in places:
+        raise ValueError('Select a valid start and destination.')
+    if start == end:
+        raise ValueError('Choose two different places.')
+    return plan_trip(places[start],places[end],body.get('mode','walk'))
+
+
 class Handler(BaseHTTPRequestHandler):
     def respond(self, status, payload):
         content = json.dumps(payload, allow_nan=False).encode()
@@ -187,6 +198,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/graph":
                 source = body.get("source","osm")
                 return self.respond(200, graph_summary(get_graph(source,body.get("mode","walk")), source))
+            if path == "/api/trip":
+                return self.respond(200, public_trip(body))
             if path == "/api/route":
                 return self.respond(200, route(body))
             self.respond(404, {"error":"Not found"})

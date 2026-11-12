@@ -1,6 +1,6 @@
-# North Campus Routebook
+# Tinkop — North Campus Routebook
 
-A Python Discrete Mathematics project: find the shortest route between Delhi University North Campus landmarks, plot it on OpenStreetMap, and inspect Dijkstra's algorithm step by step.
+A Delhi University North Campus trip planner **and** Python Dijkstra educational lab. Default **Live public OSRM streets** mode fetches walking/driving geometry; select Local OSM graph or Sample graph to run and inspect the repository's original Dijkstra implementation.
 
 ## Run
 
@@ -12,19 +12,25 @@ python app.py
 
 Open **http://127.0.0.1:8000** in a browser. On Windows, use `py app.py` if `python` is unavailable. To change the port: `python app.py --port 8080`.
 
-1. Choose a starting point, destination, and walking / e-rickshaw / auto.
-2. Click **Find shortest route**. The first OSM request downloads and caches nearby streets; allow up to 90 seconds. You can also use **Load streets** first.
-3. See the map route, street distance, time estimate, and estimated fare. Paid-mode fare parameters can be edited under **Fare assumptions**.
-4. In **Dijkstra's trace**, use **Next step** or **Play** to watch extract-min and successful edge relaxations. Orange points mark settled vertices.
-5. Inspect **Vertices & edges**, filter the adjacency list, or export every edge as CSV. **Save JSON** exports the complete route, predecessor/distance records, and algorithm trace.
+1. Choose a starting point, destination, and walk / auto / metered taxi / metro / bus mode. Default **Live public OSRM streets** gives real walking and driving street geometries without requiring an Overpass download. Metro/bus are explicitly marked unverified with no fare, ETA or invented line.
+2. For a local Dijkstra trace, change **Network source** to **Local OSM graph · Dijkstra** (first Overpass request can take up to 90 seconds) or **Sample graph · offline**; use Walk, E-rickshaw (classroom only), or Auto.
+3. In the graph lab, use **Next step** or **Play** to watch extract-min and successful edge relaxations. Orange points mark settled vertices. The public OSRM mode does not claim to expose Dijkstra's internal trace.
+4. Inspect **Vertices & edges**, filter the adjacency list, or export every edge as CSV. **Save JSON** exports the active result.
 
 The interface uses a large map, cream paper colours, restrained green, and serif headings. It works on desktop and mobile. Python performs all route calculations; JavaScript only manages the map and interface.
+
+## Public trip estimates and limitations
+
+- **Foot route:** `routing.openstreetmap.de/routed-foot`; **car/auto/taxi route:** `router.project-osrm.org`. Both return OpenStreetMap-derived geometry, distance and duration. They are public, rate-limited/no-SLA services, not for high-volume deployment. On failure, no route, fare or ETA is invented. The separate local Dijkstra graph remains available independently. Basemap tiles are from OpenStreetMap with attribution.
+- **Walking:** free; ETA is street distance at 4.5 km/h. **Auto-rickshaw:** approximate daytime meter ₹30 first 1.5 km + ₹11/km after. **Taxi:** *black/yellow non-AC metered taxi only*, approximate daytime meter ₹40 first 1 km + ₹17/km after. See [Delhi Transport's 2023 fare order](https://transport.delhi.gov.in/sites/default/files/Transport/circulars-orders/output.pdf). Auto/taxi ETA is OSRM driving duration + assumed five-minute pickup; there is no live traffic. Night surcharge (+25% 11pm–5am), waiting, tolls and detours are excluded. These are not fare quotes or ride-hailing prices; current tariffs should be checked before travel.
+- **Metro and bus:** no station/stop matching, line routing, schedules or fare integration. A road distance is never used as a transit fare proxy. Both show no route/fare/ETA; check [DMRC](https://delhimetrorail.com/fare) and Delhi bus information for the actual journey. This does not imply service is unavailable.
+- Four campus records are linked to verified OSM objects (Hindu, Miranda, St. Stephen's, DSE), using **polygon centroids, not gates**. The remaining eight curated place pins are approximate and not claimed to be OSM-verified. Check actual access on the ground. OSM data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL.
 
 ## Real OSM data and internet access
 
 Leaflet 1.9.4 and OpenStreetMap basemap tiles require internet. Routing streets come from Overpass, independently of map tiles. The successful response is cached in `data/osm-cache.json`. Once cached, routing works without another Overpass download; map tiles and the Leaflet CDN still need internet. **Load streets** refreshes an already loaded OSM graph.
 
-The development environment could not resolve the Overpass host, so no live Delhi extract is bundled or claimed as verified. The downloader is implemented, but its live response could not be exercised here. If the request fails on your computer:
+The Overpass servers were unavailable or timed out during this integration, so no live Delhi graph extract is bundled or claimed as verified. **This does not affect the default public OSRM trip mode**, which was exercised successfully. The optional Dijkstra graph downloader remains implemented. If its request fails on your computer:
 
 1. Open [Overpass Turbo](https://overpass-turbo.eu/).
 2. Paste and run:
@@ -64,11 +70,13 @@ This finds the shortest **single-source to single-destination** street route. It
 
 | File | Purpose |
 | --- | --- |
-| `app.py` | Local Python HTTP server, OSM download/import/cache, route and fare API |
-| `routing.py` | Graph, Haversine weights, OSM profiles, Dijkstra, snapping, fare |
+| `app.py` | Local Python HTTP server, OSM download/import/cache, local Dijkstra and public trip APIs |
+| `trip.py` | Public foot/car OSRM request parsing and conservative fare/time estimates |
+| `routing.py` | Graph, Haversine weights, OSM profiles, Dijkstra, snapping, educational fare |
 | `destinations.py` | Twelve named destinations with approximate pins |
 | `static/` | HTML/CSS/JavaScript interface and Leaflet map |
 | `tests/test_routing.py` | Algorithm correctness, profiles, fare, validation tests |
+| `tests/test_trip.py` | Public endpoint, geometry, metered fares, transit and outage tests |
 | `docs/PROJECT.md` | Mathematical explanation and viva preparation |
 
 ## Verification

@@ -21,10 +21,10 @@ async function api(path, body) {
 function setBusy(value) {
   busy = value;
   ['find-route','load','source','start','end','swap','import'].forEach(id => $(id).disabled = value);
-  $('load').disabled=value || source()==='sample';
+  $('load').disabled=value || source()!=='osm';
   ['base','per-km','included'].forEach(id => $(id).disabled=value);
-  document.querySelectorAll('input[name="mode"]').forEach(el => el.disabled=value);
-  $('find-route').innerHTML = value ? 'Working on the network…' : 'Find shortest route <span>→</span>';
+  document.querySelectorAll('input[name="mode"]').forEach(el => el.disabled=value || (el.value==='erickshaw' && source()==='public') || (['metro','bus','taxi'].includes(el.value) && source()!=='public'));
+  $('find-route').innerHTML = value ? 'Working on the network…' : (source()==='public'?'Find route estimate <span>→</span>':'Find shortest route <span>→</span>');
 }
 function stopPlayback() {
   clearInterval(timer); timer=null; $('play-trace').textContent='Play ▷';
@@ -66,6 +66,7 @@ function drawPlaces() {
     const content=document.createElement('div');
     const title=document.createElement('strong');title.textContent=p.name;content.append(title);
     const note=document.createElement('p');note.textContent=p.note;content.append(note);
+    if(p.osm_ref){const link=document.createElement('a');link.href=`https://www.openstreetmap.org/${p.osm_ref}`;link.target='_blank';link.rel='noopener noreferrer';link.textContent='View OSM record ↗';content.append(link,document.createElement('br'));}
     const use=document.createElement('button');use.textContent='Set as destination →';use.className='secondary';
     use.onclick=()=>{if(!busy){$('end').value=p.id;clearResult();status('Destination selected. Find a route when ready.');map.closePopup();}};
     content.append(use);marker.bindPopup(content);
@@ -117,6 +118,7 @@ function groupedEdges(edges){
 }
 function renderRoute(data){
   result=data;traceIndex=0;stopPlayback();
+  document.querySelector('.result-heading .eyebrow').textContent='YOUR SHORTEST ROUTE';
   $('result').hidden=false;
   $('distance').textContent=metres(data.distance_m);
   $('duration').textContent=`${Math.ceil(data.duration_minutes)} min`;
@@ -141,6 +143,28 @@ function renderRoute(data){
     map.fitBounds(bounds,{padding:[65,75],maxZoom:17});
   }
   renderTrace();
+}
+function renderPublicTrip(data){
+  result=data;
+  document.querySelector('.result-heading .eyebrow').textContent='YOUR ROUTE ESTIMATE';
+  $('result').hidden=false;
+  $('distance').textContent=data.distance_m===null?'—':metres(data.distance_m);
+  $('duration').textContent=data.duration_minutes===null?'—':`~${data.duration_minutes} min`;
+  $('fare').textContent=data.fare===null?'—':data.mode==='walk'?'Free':`~₹${money(data.fare)}`;
+  $('fare-label').textContent=data.fare===null?'not verified':'approx. daytime fare';
+  $('snap-note').textContent=`${data.message} ${data.assumptions}`;
+  $('directions').innerHTML='';
+  $('destination-note').textContent=data.end.note;
+  $('trace-caption').textContent='Public OSRM routing does not produce a Dijkstra trace here. Select a local OSM or Sample graph to explore the algorithm.';
+  if(map){
+    routeLayer.clearLayers();traceLayer.clearLayers();
+    if(data.route_available && data.geometry.length>1){
+      L.polyline(data.geometry,{color:'#fffefa',weight:9}).addTo(routeLayer);
+      L.polyline(data.geometry,{color:'#d95c3a',weight:5}).addTo(routeLayer);
+      map.fitBounds(L.latLngBounds(data.geometry),{padding:[65,75],maxZoom:17});
+    }else map.fitBounds(L.latLngBounds([[data.start.lat,data.start.lon],[data.end.lat,data.end.lon]]),{padding:[65,75],maxZoom:16});
+    drawPlaces();
+  }
 }
 function renderTrace(){
   if(!result)return;
@@ -185,8 +209,13 @@ async function init(){
     $('overpass-link').href=`https://overpass-turbo.eu/?Q=${encodeURIComponent(config.query)}`;
     initialiseMap();
     $('route-form').onsubmit=async event=>{
-      event.preventDefault();if(busy)return;setBusy(true);clearResult();status('Running Dijkstra’s algorithm…');
+      event.preventDefault();if(busy)return;setBusy(true);clearResult();status(source()==='public'?'Fetching public street route…':'Running Dijkstra’s algorithm…');
       try{
+        if(source()==='public'){
+          const data=await api('trip',{mode:mode(),start:$('start').value,end:$('end').value});
+          renderPublicTrip(data);status(data.route_available?'OSRM street route loaded. Times and fares are approximate.':data.message,!data.route_available);
+          return;
+        }
         if(!graph && source()==='osm'){
           status('Downloading OSM streets before routing. The first download can take up to 90 seconds…');
           const network=await api('load',{mode:mode()});renderGraph(network);config.osm_ready=true;
@@ -201,9 +230,9 @@ async function init(){
     ['start','end'].forEach(id=>$(id).onchange=()=>clearResult());
     document.querySelectorAll('input[name="mode"]').forEach(input=>input.onchange=async()=>{
       clearResult();setBusy(true);
-      const walk=mode()==='walk';$('fare-details').hidden=walk;
+      const walk=mode()==='walk';$('fare-details').hidden=walk||source()==='public';
       $('base').value=mode()==='auto'?30:20;$('per-km').value=mode()==='auto'?12:10;$('included').value=1;
-      try{await fetchGraph();status('Transport mode changed. Find a route to update your result.');}catch(error){status(error.message,true);}
+      try{if(source()==='public'){status('Mode changed. Find a route to update the estimate.');}else{await fetchGraph();status('Transport mode changed. Find a route to update your result.');}}catch(error){status(error.message,true);}
       finally{setBusy(false);}
     });
     $('fare-details').hidden=true;
@@ -213,8 +242,11 @@ async function init(){
       clearResult();graph=null;if(map)graphLayer.clearLayers();
       $('sample-watermark').hidden=source()!=='sample';
       $('vertex-count').textContent='—';$('edge-count').textContent='—';
-      $('edge-body').innerHTML='';$('network-label').textContent=source()==='sample'?'Sample teaching graph':'OpenStreetMap streets';
-      $('network-meta').textContent='';
+      $('edge-body').innerHTML='';$('network-label').textContent=source()==='sample'?'Sample teaching graph':source()==='public'?'Public OSRM street routing':'Local OSM streets · Dijkstra';
+      $('network-meta').textContent=source()==='public'?'Real OSM road geometry. No Dijkstra trace in this mode.':'';
+      if((source()==='public' && mode()==='erickshaw') || (source()!=='public' && ['metro','bus','taxi'].includes(mode()))) document.querySelector('input[name="mode"][value="walk"]').checked=true;
+      $('fare-details').hidden=source()==='public'||mode()==='walk';
+      if(source()==='public'){setBusy(false);status('Public routing ready. Select places and find a route.');return;}
       if(source()==='osm'&&!config.osm_ready){await loadStreets();return;}
       setBusy(true);
       try{await fetchGraph();status(source()==='sample'?'Sample graph ready: 12 vertices and invented classroom weights.':'OSM street network ready.');}
@@ -247,8 +279,11 @@ async function init(){
     ['about-button','data-help'].forEach(id=>$(id).onclick=()=>$('about').showModal());
     document.querySelector('.close-dialog').onclick=()=>$('about').close();
     $('about').onclick=event=>{if(event.target===$('about')){const r=$('about').getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)$('about').close();}};
-    if(config.osm_ready){await fetchGraph();status('Cached OSM network loaded. Ready to route.');}
-    else status('Ready to explore. Find a route to download OSM streets, or choose Sample graph for an offline demonstration.');
+    setBusy(false);
+    $('network-label').textContent='Public OSRM street routing';
+    $('network-meta').textContent='Real OSM road geometry. No Dijkstra trace in this mode.';
+    if(config.osm_ready)status('Public routing ready; cached Dijkstra graph also available from Network source.');
+    else status('Public routing ready. Choose places and find a route; the graph lab remains available via Sample graph.');
   }catch(error){status(`Could not initialise Routebook: ${error.message}`,true);}
 }
 init();
