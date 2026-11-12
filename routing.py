@@ -77,6 +77,51 @@ def dijkstra(graph, source, target):
     }
 
 
+def shortest_tree(graph, source, reverse=False):
+    """Distances and predecessors for all reachable vertices, for access walks."""
+    if source not in graph.nodes:
+        raise ValueError('Source is not in the graph.')
+    adjacency = graph.adjacency
+    if reverse:
+        adjacency = {key: [] for key in graph.nodes}
+        for edge in graph.edges:
+            adjacency[edge['v']].append(edge)
+    distance, previous = {source: 0.0}, {}
+    queue = [(0.0, source)]
+    while queue:
+        cost, u = heapq.heappop(queue)
+        if cost != distance[u]:
+            continue
+        for edge in adjacency[u]:
+            v = edge['u'] if reverse else edge['v']
+            candidate = cost + edge['weight']
+            if candidate < distance.get(v, math.inf):
+                distance[v] = candidate
+                previous[v] = edge
+                heapq.heappush(queue, (candidate, v))
+    return distance, previous
+
+
+def tree_path(previous, source, target, reverse=False):
+    """Recover a street path from a forward or reverse shortest tree."""
+    if source == target:
+        return []
+    edges = []
+    if reverse:
+        vertex = source
+        while vertex != target:
+            edge = previous[vertex]
+            edges.append(edge)
+            vertex = edge['v']
+        return edges
+    vertex = target
+    while vertex != source:
+        edge = previous[vertex]
+        edges.append(edge)
+        vertex = edge['u']
+    return edges[::-1]
+
+
 WALKABLE = {"footway", "path", "pedestrian", "steps", "living_street", "residential",
             "service", "unclassified", "tertiary", "secondary", "primary", "track",
             "tertiary_link", "secondary_link", "primary_link", "cycleway"}
@@ -93,7 +138,7 @@ def permitted(tags, mode):
     if mode == "walk":
         access = tags.get("foot", tags.get("access", "yes"))
         return access not in DENIED and (highway != "cycleway" or tags.get("foot") in {"yes", "designated", "permissive"})
-    access = tags.get("motorcar", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))
+    access = tags.get("bus", tags.get("psv", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))) if mode == "bus" else tags.get("motorcar", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))
     return access not in DENIED
 
 
@@ -115,7 +160,7 @@ def graph_from_osm(payload, mode):
         if mode == "walk":
             access = tags.get("foot", tags.get("access", "yes"))
         else:
-            access = tags.get("motorcar", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))
+            access = tags.get("bus", tags.get("psv", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))) if mode == "bus" else tags.get("motorcar", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))
         if access in DENIED:
             blocked.add(str(element["id"]))
     for way in elements:
@@ -134,29 +179,47 @@ def graph_from_osm(payload, mode):
             name = tags.get("name", tags.get("highway", "Unnamed way").replace("_", " ").title())
             if direction != "-1":
                 graph.add_edge(u, v, weight, name, way["id"])
+                graph.edges[-1]["geometry"] = [coords[u],coords[v]]
             if direction not in {"yes", "1", "true"}:
                 graph.add_edge(v, u, weight, name, way["id"])
+                graph.edges[-1]["geometry"] = [coords[v],coords[u]]
     if not graph.edges:
         raise ValueError("The OSM file contains no usable streets for this transport mode.")
     return graph
 
 
-def nearest_node(graph, coordinate, outgoing=False):
-    candidates = (key for key in graph.nodes if not outgoing or graph.adjacency[key])
+def largest_component(graph):
+    """Publicly connected street network; isolated courtyards stay as pin gaps."""
+    neighbors = {key: set() for key in graph.nodes}
+    for edge in graph.edges:
+        neighbors[edge['u']].add(edge['v'])
+        neighbors[edge['v']].add(edge['u'])
+    seen, largest = set(), set()
+    for start in graph.nodes:
+        if start in seen:
+            continue
+        component, stack = {start}, [start]
+        seen.add(start)
+        while stack:
+            for neighbor in neighbors[stack.pop()]:
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    component.add(neighbor)
+                    stack.append(neighbor)
+        if len(component) > len(largest):
+            largest = component
+    return largest
+
+
+def nearest_node(graph, coordinate, outgoing=False, max_distance=450, allowed=None):
+    candidates = (key for key in graph.nodes if (allowed is None or key in allowed)
+                  and (not outgoing or graph.adjacency[key]))
     try:
         key = min(candidates, key=lambda n: haversine(coordinate, graph.nodes[n]))
     except ValueError:
         raise ValueError("No usable road vertex is available.") from None
     distance = haversine(coordinate, graph.nodes[key])
-    if distance > 450:
-        raise ValueError("This destination is over 450 m from a usable street. Choose another mode or import a wider OSM extract.")
+    if distance > max_distance:
+        raise ValueError(f"This destination is over {max_distance} m from a usable vertex. Choose another mode or import a wider OSM extract.")
     return key, distance
 
-
-def fare(distance_m, mode, base=20, per_km=10, included_km=1):
-    if mode == "walk" or distance_m == 0:
-        return 0
-    values = (base, per_km, included_km, distance_m)
-    if not all(math.isfinite(v) and v >= 0 for v in values):
-        raise ValueError("Fare settings must be finite, non-negative numbers.")
-    return round(base + max(0, distance_m / 1000 - included_km) * per_km, 2)

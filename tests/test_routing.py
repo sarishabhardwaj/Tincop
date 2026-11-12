@@ -3,7 +3,8 @@ import random
 import unittest
 
 from app import SAMPLE, STATE, install_osm, route
-from routing import Graph, dijkstra, fare, graph_from_osm, haversine, nearest_node
+from routing import Graph, dijkstra, graph_from_osm, haversine, nearest_node
+from transit import transit_fare
 
 
 def osm_fixture(tags=None, middle_tags=None):
@@ -94,24 +95,28 @@ class RoutingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'450'):nearest_node(graph,[0,0])
 
     def test_fare_boundaries(self):
-        self.assertEqual(fare(2280,'erickshaw',20,10,1),32.8)
-        self.assertEqual(fare(500,'erickshaw',20,10,1),20)
-        self.assertEqual(fare(0,'auto',30,12,1),0)
-        self.assertEqual(fare(3000,'walk'),0)
-        with self.assertRaises(ValueError):fare(1000,'auto',math.nan)
+        self.assertEqual(transit_fare(2280,'bus'),5)
+        self.assertEqual(transit_fare(4000,'bus'),5)
+        self.assertEqual(transit_fare(4001,'bus'),10)
+        self.assertEqual(transit_fare(4001,'bus',True),15)
+        self.assertEqual(transit_fare(2000,'metro'),11)
+        self.assertEqual(transit_fare(2001,'metro'),21)
+        self.assertEqual(transit_fare(0,'metro'),0)
+        self.assertEqual(transit_fare(3000,'walk'),0)
+        with self.assertRaises(ValueError):transit_fare(math.nan,'metro')
 
     def test_sample_route_and_full_path_sum(self):
-        result=route({'source':'sample','mode':'erickshaw','start':'metro','end':'kamla'})
+        result=route({'source':'sample','mode':'bus','start':'metro','end':'kamla'})
         self.assertEqual(result['path'],['A','H','B','E','F','K'])
         self.assertEqual(result['distance_m'],2280)
         self.assertEqual(sum(e['weight'] for e in result['edges']),result['distance_m'])
-        self.assertEqual(result['fare'],32.8)
+        self.assertEqual(result['fare'],5)
         self.assertEqual(len(SAMPLE.nodes),12)
 
     def test_invalid_route_inputs(self):
-        for body in [dict(source='wrong'),dict(source='sample',mode='bus'),dict(source='sample',start='unknown')]:
+        for body in [dict(source='wrong'),dict(source='sample',mode='auto'),dict(source='sample',start='unknown')]:
             with self.assertRaises(ValueError):route(body)
-        with self.assertRaises(ValueError):route({'source':'sample','start':'metro','end':'kamla','fare':{'base':float('nan')}})
+        with self.assertRaises(ValueError):route({'source':'sample','start':'metro','end':'kamla','fare':{'bus_type':'invalid'}})
 
     def test_import_rejected_without_replacing_valid_state(self):
         previous=dict(STATE)
