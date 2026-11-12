@@ -2,11 +2,11 @@
 
 ## Aim
 
-Model campus streets as a weighted graph and use Dijkstra's algorithm to find a minimum-distance route. Show how the graph relates to a real OpenStreetMap basemap, then estimate a fare from the computed distance.
+Model campus streets and bus/metro services as weighted graphs and use Dijkstra's algorithm to find a minimum-distance route. Show how the graph relates to a real OpenStreetMap basemap, then estimate a fare from the computed distance.
 
 ## Mathematical model
 
-Let `G = (V, E)` be a directed graph. Each street point is a vertex, and an allowed consecutive segment of an OSM way is a directed edge. Two-way segments have edges in both directions. For edge `(u,v)`, let `w(u,v) ≥ 0` be the distance in metres.
+Let `G = (V, E)` be a directed graph. For walking, each street point is a vertex and an allowed consecutive OSM way segment is an edge. Two-way segments have edges in both directions. For bus/metro, vertices are mapped stops and edges are directed service connections between consecutive stops, reconstructed over available route-member geometry. For edge `(u,v)`, let `w(u,v) ≥ 0` be the distance in metres.
 
 For a path `P = (s, …, t)`, its length is `L(P) = Σ w(u,v)` over the edges in the path. We seek `P*` with minimum `L(P)` among paths from `s` to `t` in the loaded graph. Restricting graph size or access changes the set of candidate paths.
 
@@ -60,7 +60,7 @@ Use the sample graph with Metro as source and Kamla Nagar as destination.
 
 The minimum path is `A → H → B → E → F → K` with weights `450 + 400 + 180 + 300 + 950 = 2,280 m`. These are invented classroom weights. They illustrate graph optimisation, not real travel distances.
 
-An e-rickshaw illustration uses a ₹20 base covering 1 km, then ₹10/km: `20 + max(0, 2.28 − 1) × 10 = ₹32.80`. Rates are editable. The algorithm minimises distance first; fare is a post-processing function.
+On this sample distance, an ordinary bus ticket estimate is ₹5, AC bus ₹10, metro ₹21 and walking free. These demonstrate reference distance slabs, not actual services on the invented sample graph. The algorithm minimises distance first; ticket estimation is post-processing. A bus service change adds another ticket.
 
 ## Five-minute demonstration
 
@@ -69,10 +69,10 @@ An e-rickshaw illustration uses a ₹20 base covering 1 km, then ₹10/km: `20 +
 3. Find a walking route. Identify the distance and route polyline.
 4. Open **Vertices & edges** to show directed edges and their weights.
 5. Reset the trace and step through extract-min and relaxation. Explain infinity and the predecessor relationship.
-6. Switch to an auto or e-rickshaw profile. Explain that access/one-way rules can change the graph before the algorithm runs.
-7. Edit fare assumptions and recalculate. Export the route's full trace as JSON.
+6. Switch to Bus or Metro. Explain that these graphs require explicit service relations and stops; an ordinary road is not evidence of a service. The app reports missing transit data instead of inventing a route.
+7. Compare ordinary/AC bus ticket estimates and metro reference slabs. Export the route's full trace as JSON.
 
-If live OSM is unavailable, explicitly switch to **Sample graph** and explain that it is an educational model with invented edges. Do not describe it as an actual street route.
+For a road-routing demonstration without another data request, choose **Saved roads · offline** after one real OSM download/import. If no real data is available, **Maths diagram · offline** shows a separate abstract SVG graph. The synthetic example never returns geographic geometry or draws on the campus map.
 
 ## Viva questions
 
@@ -82,12 +82,20 @@ If live OSM is unavailable, explicitly switch to **Sample graph** and explain th
 
 **Why not use A*?** A* could speed up a geographic search with an admissible heuristic, but this project deliberately demonstrates Dijkstra without a heuristic.
 
-**Is the shortest route always the cheapest?** Not generally. With a common nondecreasing distance-based fare within one mode, it gives a minimum estimate under that formula. Different providers, tolls, waiting fees, traffic, or mixed-mode trips need another model.
+**Is the shortest route always the cheapest?** Not generally. Not necessarily even within one mode: bus transfers can add tickets, and official fares can use fare stages or different network distances. This project minimises distance and then estimates tickets. Cheapest-fare optimisation or combined bus + metro + walking journeys need another graph/state model.
 
-**Are landmarks the routing vertices?** In the real OSM graph, the routing vertices are street nodes, and landmarks select nearby nodes. The small sample graph treats landmark letters as vertices for teaching.
+**Are landmarks the routing vertices?** Walking vertices are street nodes; bus/metro vertices are stops. Landmark pins select nearby eligible vertices. Access gaps are reported as numbers and are not drawn or treated as navigable links. The small sample graph treats landmark letters as vertices for teaching.
 
 **What if there is no path?** The queue becomes empty before the target is settled. The app reports an unreachable route. It does not draw a fabricated street connection.
 
-**Does a map itself calculate routes?** No. OSM tiles provide the visual background. Overpass supplies the street data; the Python implementation constructs and searches its own graph.
+**Does a map itself calculate routes?** No. OSM tiles provide the visual background. The main OpenStreetMap API or a streets-only Overpass query supplies the street data; the Python implementation constructs and searches its own graph.
 
-**What assumptions limit this project?** Approximate destination pins, a bounded street extract, simple mode/access rules, no turn restrictions or live traffic, and illustrative fare/speed assumptions. Dashed snapping gaps are excluded from route totals. Campuses and heritage sites can restrict entry.
+**What assumptions limit this project?** Approximate destination pins, a bounded street extract, incomplete OSM service coverage, nearest-stop selection, simple access rules, no turn restrictions or live schedules, and reference fare/speed assumptions. Bus/metro connections are reconstructed from ordered stops and connected route geometry. Access walks and platform projection gaps are not routed. Unrouted access gaps are excluded from route totals and from the map polylines. Campuses and heritage sites can restrict entry.
+
+## Data-download recovery
+
+The main OSM map API is the first source, with a lightweight streets-only Overpass fallback. Python attempts these sources; the browser attempts them if Python cannot connect. Transit queries run separately. Imported `.osm` XML and OSM JSON are supported, and successful data is cached. Failed refreshes preserve a working cache. Saved roads mode performs no network download. The abstract maths example never replaces or masquerades as a real geographic route.
+
+## Geometry regression check
+
+A synthetic OSM test road has a right-angle bend. The test verifies that Dijkstra returns the intermediate corner node and that exported route segments preserve it. A frontend test checks the actual polyline calls: only the mapped segments are drawn, with no diagonal shortcut and no straight connection from off-road landmark pins. Another test checks that the maths demo creates zero map polylines.

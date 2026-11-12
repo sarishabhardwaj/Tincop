@@ -93,7 +93,7 @@ def permitted(tags, mode):
     if mode == "walk":
         access = tags.get("foot", tags.get("access", "yes"))
         return access not in DENIED and (highway != "cycleway" or tags.get("foot") in {"yes", "designated", "permissive"})
-    access = tags.get("motorcar", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))
+    access = tags.get("bus", tags.get("psv", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))) if mode == "bus" else tags.get("motorcar", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))
     return access not in DENIED
 
 
@@ -115,7 +115,7 @@ def graph_from_osm(payload, mode):
         if mode == "walk":
             access = tags.get("foot", tags.get("access", "yes"))
         else:
-            access = tags.get("motorcar", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))
+            access = tags.get("bus", tags.get("psv", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))) if mode == "bus" else tags.get("motorcar", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))
         if access in DENIED:
             blocked.add(str(element["id"]))
     for way in elements:
@@ -134,29 +134,23 @@ def graph_from_osm(payload, mode):
             name = tags.get("name", tags.get("highway", "Unnamed way").replace("_", " ").title())
             if direction != "-1":
                 graph.add_edge(u, v, weight, name, way["id"])
+                graph.edges[-1]["geometry"] = [coords[u],coords[v]]
             if direction not in {"yes", "1", "true"}:
                 graph.add_edge(v, u, weight, name, way["id"])
+                graph.edges[-1]["geometry"] = [coords[v],coords[u]]
     if not graph.edges:
         raise ValueError("The OSM file contains no usable streets for this transport mode.")
     return graph
 
 
-def nearest_node(graph, coordinate, outgoing=False):
+def nearest_node(graph, coordinate, outgoing=False, max_distance=450):
     candidates = (key for key in graph.nodes if not outgoing or graph.adjacency[key])
     try:
         key = min(candidates, key=lambda n: haversine(coordinate, graph.nodes[n]))
     except ValueError:
         raise ValueError("No usable road vertex is available.") from None
     distance = haversine(coordinate, graph.nodes[key])
-    if distance > 450:
-        raise ValueError("This destination is over 450 m from a usable street. Choose another mode or import a wider OSM extract.")
+    if distance > max_distance:
+        raise ValueError(f"This destination is over {max_distance} m from a usable vertex. Choose another mode or import a wider OSM extract.")
     return key, distance
 
-
-def fare(distance_m, mode, base=20, per_km=10, included_km=1):
-    if mode == "walk" or distance_m == 0:
-        return 0
-    values = (base, per_km, included_km, distance_m)
-    if not all(math.isfinite(v) and v >= 0 for v in values):
-        raise ValueError("Fare settings must be finite, non-negative numbers.")
-    return round(base + max(0, distance_m / 1000 - included_km) * per_km, 2)
