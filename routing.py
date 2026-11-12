@@ -107,10 +107,17 @@ def graph_from_osm(payload, mode):
     elements = payload.get("elements", [])
     coords = {str(e["id"]): [e["lat"], e["lon"]] for e in elements if e["type"] == "node"}
     # Exclude explicitly blocked nodes, including barriers with access=no.
-    blocked = {str(e["id"]) for e in elements if e["type"] == "node" and
-               (e.get("tags", {}).get("foot", e.get("tags", {}).get("access", "yes")) in DENIED
-                if mode == "walk" else
-                e.get("tags", {}).get("motor_vehicle", e.get("tags", {}).get("vehicle", e.get("tags", {}).get("access", "yes"))) in DENIED)}
+    blocked = set()
+    for element in elements:
+        if element["type"] != "node":
+            continue
+        tags = element.get("tags", {})
+        if mode == "walk":
+            access = tags.get("foot", tags.get("access", "yes"))
+        else:
+            access = tags.get("motorcar", tags.get("motor_vehicle", tags.get("vehicle", tags.get("access", "yes"))))
+        if access in DENIED:
+            blocked.add(str(element["id"]))
     for way in elements:
         tags = way.get("tags", {})
         if way["type"] != "way" or not permitted(tags, mode):
