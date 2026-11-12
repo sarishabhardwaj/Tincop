@@ -103,6 +103,7 @@ function renderGraph(data) {
   graph=data; edgePage=0;
   $('vertex-count').textContent=data.vertices.toLocaleString('en-IN');
   $('edge-count').textContent=data.edges.toLocaleString('en-IN');
+  $('edge-weight-header').textContent=data.weight_unit==='min'?'WEIGHT (min)':'WEIGHT (m)';
   $('network-label').textContent=data.source==='sample'?'Sample teaching graph':'OpenStreetMap network';
   $('network-meta').textContent=data.source==='sample'?'Abstract maths diagram. No geographic routes.':`Cached ${new Date(data.fetched_at).toLocaleDateString()} · ${mode()} · available: ${data.available_modes.join(', ')}`;
   updateMapView();renderSchematic();
@@ -190,14 +191,16 @@ function groupedEdges(edges){
   },[]);
 }
 function renderRoute(data){
+  if(data.route_graph)renderGraph(data.route_graph);
   result=data;traceIndex=0;stopPlayback();
   $('result').hidden=false;
   $('distance').textContent=metres(data.distance_m);
   $('duration').textContent=`${Math.ceil(data.duration_minutes)} min`;
   $('fare').textContent=data.mode==='walk'?'Free':`₹${money(data.fare)}`;
   $('fare-label').textContent=data.mode==='walk'?'walking fare':'project estimate';
+  $('route-criterion').textContent=data.optimality==='estimated_time'?`FASTEST ${data.mode.toUpperCase()} JOURNEY IN THIS GRAPH`:'YOUR SHORTEST ROUTE';
   $('visited-count').textContent=data.settled_count.toLocaleString('en-IN');
-  $('snap-note').textContent=data.source==='sample'?'Abstract maths example only. No geographic route or real services.':`${data.mode==='walk'?'Street-to-street':'Stop-to-stop'} route. Landmark access gaps: ${Math.round(data.start_snap_m)} m at start + ${Math.round(data.end_snap_m)} m at arrival. These are not routed or drawn; excluded from totals.`;
+  $('snap-note').textContent=data.source==='sample'?'Abstract maths example only. No geographic route or real services.':data.mode==='walk'?`Street route. Unrouted landmark gaps: ${Math.round(data.start_snap_m)} m at start + ${Math.round(data.end_snap_m)} m at arrival.`:`Mapped walk ${metres(data.access_distance_m)} + ${data.mode} ride ${metres(data.ride_distance_m)}. Unrouted pin/platform gaps total ${Math.round(data.start_snap_m+data.end_snap_m+(data.stop_access_gap_m||0))} m; excluded from totals.${data.walking_alternative_minutes<data.duration_minutes?` Walking only may be quicker (about ${Math.ceil(data.walking_alternative_minutes)} min).`:''}`;
   const groups=groupedEdges(data.edges);
   $('directions').innerHTML=groups.length?groups.map(g=>`<li>${esc(g.name)} <small>${metres(g.distance)}</small></li>`).join(''):`<li>Both selections connect to the same ${data.mode==='walk'?'vertex':'stop'}. No ride is included. Choose Walking for the local journey.</li>`;
   $('destination-note').textContent=data.end.note;
@@ -211,7 +214,7 @@ function renderRoute(data){
       }
     }
     if(data.coordinate_system==='wgs84'){
-      [data.path[0],data.path.at(-1)].forEach((key,i)=>L.circleMarker(graph.nodes[key],{radius:7,color:'#fffefa',weight:2,fillColor:i?'#ad633e':'#234c3a',fillOpacity:1}).bindTooltip(i?'Route ends on the mapped network':'Route starts on the mapped network').addTo(routeLayer));
+      [data.geometry[0],data.geometry.at(-1)].forEach((point,i)=>L.circleMarker(point,{radius:7,color:'#fffefa',weight:2,fillColor:i?'#ad633e':'#234c3a',fillOpacity:1}).bindTooltip(i?'Route ends on the mapped network':'Route starts on the mapped network').addTo(routeLayer));
     }
     drawPlaces();
     const bounds=L.latLngBounds([...data.geometry,[data.start.lat,data.start.lon],[data.end.lat,data.end.lon]]);
@@ -222,19 +225,21 @@ function renderRoute(data){
 function renderTrace(){
   if(!result)return;
   const shown=result.steps.slice(0,traceIndex);
+  const unit=result.cost_unit==='min'?' min':' m';
+  $('trace-cost-header').textContent=result.cost_unit==='min'?'ESTIMATED MINUTES':'DISTANCE FROM START';
   $('trace-caption').textContent=`Step ${traceIndex} of ${result.steps.length} · ${traceIndex===result.steps.length?'Destination settled. The shortest path is final.':'Extract the smallest tentative distance, then relax its outgoing edges.'}`;
   // Keep rendering bounded for large graphs, while the full trace stays in export.
   const start=Math.max(0,shown.length-100);
-  $('trace-body').innerHTML=shown.length?shown.slice(start).map((step,i)=>`<tr class="${i+start===shown.length-1?'current':''}"><td>${i+start+1}</td><td>${esc(step.node)}</td><td>${step.distance.toFixed(1)} m</td><td>${step.relaxations.length?step.relaxations.map(r=>`${esc(r.to)}: ${r.old===null?'∞':r.old.toFixed(1)} → ${r.new.toFixed(1)} m`).join(' · '):'—'}</td></tr>`).join(''):'<tr><td colspan="4" class="empty-cell">Initialise: d(start) = 0; all other distances = ∞. Press Next step.</td></tr>';
+  $('trace-body').innerHTML=shown.length?shown.slice(start).map((step,i)=>`<tr class="${i+start===shown.length-1?'current':''}"><td>${i+start+1}</td><td>${esc(step.node)}</td><td>${step.distance.toFixed(1)}${unit}</td><td>${step.relaxations.length?step.relaxations.map(r=>`${esc(r.to)}: ${r.old===null?'∞':r.old.toFixed(1)} → ${r.new.toFixed(1)}${unit}`).join(' · '):'—'}</td></tr>`).join(''):'<tr><td colspan="4" class="empty-cell">Initialise: d(start) = 0; all other distances = ∞. Press Next step.</td></tr>';
   $('next-trace').disabled=traceIndex>=result.steps.length;
   $('play-trace').disabled=traceIndex>=result.steps.length;
   $('reset-trace').disabled=false;
   renderSchematic();
   if(map && result.coordinate_system!=='diagram'){
     traceLayer.clearLayers();
-    shown.forEach(step=>L.circleMarker(graph.nodes[step.node],{radius:4,color:'#a86a38',weight:1,fillColor:'#d99a57',fillOpacity:.9}).addTo(traceLayer));
+    shown.forEach(step=>L.circleMarker(result.trace_nodes?.[step.node] || graph.nodes[step.node],{radius:4,color:'#a86a38',weight:1,fillColor:'#d99a57',fillOpacity:.9}).addTo(traceLayer));
     const last=shown.at(-1);
-    if(last)L.circleMarker(graph.nodes[last.node],{radius:8,color:'#a86a38',weight:2,fillOpacity:.2}).bindTooltip(`Settled ${esc(last.node)} · ${last.distance.toFixed(1)} m`).addTo(traceLayer);
+    if(last)L.circleMarker(result.trace_nodes?.[last.node] || graph.nodes[last.node],{radius:8,color:'#a86a38',weight:2,fillOpacity:.2}).bindTooltip(`Settled ${esc(last.node)} · ${last.distance.toFixed(1)}${unit}`).addTo(traceLayer);
   }
   const wrap=$('trace-body').closest('.table-wrap');wrap.scrollTop=wrap.scrollHeight;
 }
@@ -327,7 +332,7 @@ async function init(){
     $('edge-search').oninput=()=>{edgePage=0;renderEdges();};
     $('prev-page').onclick=()=>{edgePage--;renderEdges();};$('next-page').onclick=()=>{edgePage++;renderEdges();};
     $('export').onclick=()=>{if(result)download('north-campus-route.json',JSON.stringify({...result,notes:'Fare and time are illustrative estimates. Access gaps excluded. Sample source is not real street routing.'},null,2),'application/json');};
-    $('edges-export').onclick=()=>{if(graph){const csvCell=s=>'"'+String(s).replace(/"/g,'""')+'"';download('north-campus-edges.csv','from,to,weight_metres,street,osm_way_id\n'+graph.links.map(e=>[e.u,e.v,e.weight,e.name,e.way_id??''].map(csvCell).join(',')).join('\n'),'text/csv');}};
+    $('edges-export').onclick=()=>{if(graph){const csvCell=s=>'"'+String(s).replace(/"/g,'""')+'"';const unit=graph.weight_unit==='min'?'minutes':'metres';download('north-campus-edges.csv',`from,to,weight_${unit},street,osm_way_id\n`+graph.links.map(e=>[e.u,e.v,e.weight,e.name,e.way_id??''].map(csvCell).join(',')).join('\n'),'text/csv');}};
     ['trace','edges','math'].forEach(tab=>$(tab+'-tab').onclick=()=>{
       ['trace','edges','math'].forEach(other=>{const active=other===tab;$(other+'-tab').classList.toggle('active',active);$(other+'-tab').setAttribute('aria-selected',String(active));$(other+'-panel').hidden=!active;});
     });

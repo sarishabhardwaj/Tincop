@@ -61,19 +61,19 @@ Bus and metro services are **never inferred from a generic road network**. Missi
 
 Transit connections are reconstructed between consecutive mapped stops over connected member ways. Bus geometry respects road one-way/access rules. Subway direction comes from the stop order of each route relation; a reverse service needs its own relation. Stop/platform pairs at the same position are deduplicated. Platforms represented only by polygons are not currently supported.
 
-Pins are approximate landmark locations, not verified entrances. Walking snaps to street nodes within 450 m; transit snaps to stops within 1,500 m. Access gaps are reported numerically, **never drawn as roads or walking paths**, and excluded from distance, time and fare. The map marks where the actual network route starts and ends. The app searches between the nearest selected vertices; it does not compare all alternative access stops. If two landmarks snap to the same station, there is no metro ride and the fare is zero; use Walking for that local journey.
+Pins are approximate landmark locations, not verified entrances. The app chooses nearby vertices on the largest connected walking network, avoiding isolated college courtyards. Walking routes minimise mapped street distance. Bus/metro journeys attach several mapped stops to that walking network, route the walking approaches on OSM streets, then run Dijkstra on a two-layer stop graph that requires at least one transit edge. For transit, edge weights are estimated minutes (walking 4.5 km/h, bus 15 km/h, metro 32 km/h plus a 4 or 5 minute boarding allowance). The selected result is the fastest estimated journey **within that mode**, not necessarily faster than walking alone. Landmark-to-street and platform projection gaps are reported numerically but are never drawn as paths or included in totals.
 
 This version compares separate walking, bus and metro graphs. It does **not** optimise a combined bus + metro + walking itinerary, schedules, turn restrictions, transfer walks, opening hours or traffic. Platform-to-track snapping is an approximation; tiny projection gaps are not added to ride distance. Check campus entry rules locally.
 
 ## Ticket reference
 
-Fares are estimated after the algorithm minimises distance. They are not live quotes, fare-stage lookups or concessions.
+Fares are estimated after Dijkstra selects a route. Only the mapped bus/metro ride distance is charged; mapped walking access is free. They are not live quotes, fare-stage lookups or concessions.
 
 - Ordinary bus: up to 4 km ₹5; above 4–10 km ₹10; above 10 km ₹15.
 - AC bus: up to 4 km ₹10; above 4–8 km ₹15; above 8–12 km ₹20; above 12 km ₹25.
 - Metro standard reference: up to 2 / 5 / 12 / 21 / 32 / over 32 km: ₹11 / ₹21 / ₹32 / ₹43 / ₹54 / ₹64.
 - Metro discounts, Sunday/holiday concessions and other fare exceptions are excluded. A service change on a bus adds another ticket estimate; metro line changes use one total-distance estimate.
-- Travel time uses assumed speeds: walking 4.5 km/h, bus 15 km/h and metro 32 km/h. Waiting, access and boarding time are excluded.
+- Travel time uses assumed speeds: walking 4.5 km/h, bus 15 km/h and metro 32 km/h. Mapped access walks and a 4 minute bus or 5 minute metro boarding allowance are included. Live waiting and platform projection gaps are excluded.
 
 References: [Delhi Tourism bus fares](https://delhitourism.gov.in/transport/city_bus.html), [DMRC fare page](https://delhimetrorail.com/fare). Confirm the actual ticket fare before travel.
 

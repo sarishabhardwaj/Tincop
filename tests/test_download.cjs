@@ -119,3 +119,25 @@ test('map draws mapped segments only and does not invent landmark connectors',()
   // and no invented link from either off-road landmark pin to the network.
   assert.deepEqual(lines,[[a,corner],[a,corner],[corner,b],[corner,b]]);
 });
+test('transit result displays minute weights and settles virtual stop vertices',()=>{
+  const {context,nodes}=mapHarness();
+  const a=[28.69,77.21],b=[28.691,77.21];
+  const links=[{u:'__origin__',v:'pre:stop:a',weight:0,name:'Walk',geometry:[a,a],transport:'walk',distance_m:0},
+    {u:'pre:stop:a',v:'ride:stop:b',weight:4.5,name:'Bus test',geometry:[a,b],transport:'bus',distance_m:111},
+    {u:'ride:stop:b',v:'__target__',weight:0,name:'Walk',geometry:[b,b],transport:'walk',distance_m:0}];
+  context.routeInput={source:'cached',coordinate_system:'wgs84',mode:'bus',optimality:'estimated_time',cost_unit:'min',
+    graph_vertices:4,graph_edges:3,distance_m:111,duration_minutes:4.5,fare:5,settled_count:4,
+    access_distance_m:0,ride_distance_m:111,stop_access_gap_m:0,walking_alternative_minutes:10,
+    start:{id:'start',lat:a[0],lon:a[1]},end:{id:'end',lat:b[0],lon:b[1],note:'test'},
+    start_snap_m:0,end_snap_m:0,path:['__origin__','pre:stop:a','ride:stop:b','__target__'],edges:links,
+    geometry:[a,b],segments:[[a,a],[a,b],[b,b]],
+    trace_nodes:{'__origin__':a,'pre:stop:a':a,'ride:stop:b':b,'__target__':b},
+    steps:[{node:'__origin__',distance:0,relaxations:[{to:'pre:stop:a',old:null,new:0}]}],
+    route_graph:{source:'cached',coordinate_system:'wgs84',vertices:4,edges:3,weight_unit:'min',
+      available_modes:['walk','bus'],fetched_at:'2026-11-12',nodes:{'__origin__':a,'pre:stop:a':a,'ride:stop:b':b,'__target__':b},links}};
+  vm.runInContext('renderRoute(routeInput); nextTrace()',context);
+  assert.equal(nodes.get('edge-weight-header').textContent,'WEIGHT (min)');
+  assert.equal(nodes.get('trace-cost-header').textContent,'ESTIMATED MINUTES');
+  assert.match(nodes.get('trace-body').innerHTML,/0\.0 min/);
+  assert.match(nodes.get('route-criterion').textContent,/FASTEST BUS/);
+});

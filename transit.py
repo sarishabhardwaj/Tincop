@@ -1,6 +1,6 @@
 """Build stop-to-stop transit edges only from explicit OSM route relations."""
 import math
-from routing import Graph, dijkstra, graph_from_osm, haversine
+from routing import Graph, dijkstra, graph_from_osm, haversine, largest_component, nearest_node, shortest_tree, tree_path
 
 
 def transit_graph(payload, mode):
@@ -53,6 +53,72 @@ def transit_graph(payload, mode):
             graph.add_edge(a['key'],b['key'],path['distance_m'],f"{mode.title()} {service}: {a['name']} → {b['name']}",relation['id'])
             graph.edges[-1].update(geometry=[network.nodes[n] for n in path['path']],service=str(service),transport=mode)
     return graph
+
+
+def transit_journey(streets, services, start, end, mode):
+    """Find a service journey with mapped walking access at both ends.
+
+    Two stop layers require at least one transit edge. Access edge weights
+    are minutes, so Dijkstra chooses the fastest estimated complete journey.
+    """
+    connected = largest_component(streets)
+    start_node, start_gap = nearest_node(streets, start, outgoing=True,allowed=connected)
+    end_node, end_gap = nearest_node(streets, end,allowed=connected)
+    from_start, forward = shortest_tree(streets, start_node)
+    to_end, reverse = shortest_tree(streets, end_node, reverse=True)
+    graph = Graph()
+    graph.add_node('__origin__', *streets.nodes[start_node])
+    graph.add_node('__target__', *streets.nodes[end_node])
+    speed = 250 if mode == 'bus' else 32000 / 60  # metres per minute
+    boarding_minutes = 4 if mode == 'bus' else 5
+    stop_access = {}
+    for key, point in services.nodes.items():
+        # A stop must have a mapped street approach. Its unmapped platform
+        # projection is disclosed, never drawn as a path through a building.
+        try: road, gap = nearest_node(streets, point, max_distance=300,allowed=connected)
+        except ValueError: continue
+        stop_access[key] = (road, gap)
+        for prefix in ('pre:', 'ride:'):
+            graph.add_node(prefix+key, *point)
+    for key, (road, gap) in stop_access.items():
+        if road in from_start and from_start[road] <= 4000:
+            edges = tree_path(forward, start_node, road)
+            geometry = [streets.nodes[start_node]] + [streets.nodes[e['v']] for e in edges]
+            distance = from_start[road]
+            graph.add_edge('__origin__','pre:'+key,distance/75,'Walk to boarding stop')
+            graph.edges[-1].update(geometry=geometry if len(geometry)>1 else geometry*2,
+                                   distance_m=distance, transport='walk', stop_gap_m=gap)
+        if road in to_end and to_end[road] <= 4000:
+            edges = tree_path(reverse, road, end_node, reverse=True)
+            geometry = [streets.nodes[road]] + [streets.nodes[e['v']] for e in edges]
+            distance = to_end[road]
+            graph.add_edge('ride:'+key,'__target__',distance/75,'Walk from alighting stop')
+            graph.edges[-1].update(geometry=geometry if len(geometry)>1 else geometry*2,
+                                   distance_m=distance, transport='walk', stop_gap_m=gap)
+    for edge in services.edges:
+        if edge['u'] not in stop_access or edge['v'] not in stop_access:
+            continue
+        ride_minutes = edge['weight']/speed
+        for u, extra in (('pre:'+edge['u'],boarding_minutes),('ride:'+edge['u'],0)):
+            graph.add_edge(u,'ride:'+edge['v'],ride_minutes+extra,edge['name'],edge['way_id'])
+            graph.edges[-1].update(geometry=edge['geometry'],distance_m=edge['weight'],
+                                   service=edge.get('service'),transport=mode)
+    try:
+        result = dijkstra(graph,'__origin__','__target__')
+    except ValueError:
+        raise ValueError(f'No connected {mode} journey with mapped walking access was found in this OSM extract. Try Walking or a different destination.') from None
+    result.update(duration_minutes=result['distance_m'],
+                  distance_m=sum(e['distance_m'] for e in result['edges']),
+                  ride_distance_m=sum(e['distance_m'] for e in result['edges'] if e['transport']==mode),
+                  access_distance_m=sum(e['distance_m'] for e in result['edges'] if e['transport']=='walk'),
+                  stop_access_gap_m=sum(e.get('stop_gap_m',0) for e in result['edges']),
+                  start_snap_m=start_gap,end_snap_m=end_gap,
+                  trace_nodes=graph.nodes,cost_unit='min',optimality='estimated_time',
+                  walking_alternative_minutes=from_start.get(end_node, math.inf)/75,
+                  route_graph={'nodes':graph.nodes,'links':graph.edges,
+                               'vertices':len(graph.nodes),'edges':len(graph.edges),'weight_unit':'min'},
+                  graph_vertices=len(graph.nodes),graph_edges=len(graph.edges))
+    return result
 
 
 def transit_fare(distance_m, mode, ac=False):

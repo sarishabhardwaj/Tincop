@@ -6,9 +6,9 @@ Model campus streets and bus/metro services as weighted graphs and use Dijkstra'
 
 ## Mathematical model
 
-Let `G = (V, E)` be a directed graph. For walking, each street point is a vertex and an allowed consecutive OSM way segment is an edge. Two-way segments have edges in both directions. For bus/metro, vertices are mapped stops and edges are directed service connections between consecutive stops, reconstructed over available route-member geometry. For edge `(u,v)`, let `w(u,v) ≥ 0` be the distance in metres.
+Let `G = (V, E)` be a directed graph. For walking, each street point is a vertex and an allowed consecutive OSM way segment is an edge. Two-way segments have edges in both directions. For bus/metro, vertices are mapped stops and edges are directed service connections between consecutive stops, reconstructed over available route-member geometry. For edge `(u,v)`, let `w(u,v) ≥ 0` be its cost: metres for walking or estimated minutes for bus/metro.
 
-For a path `P = (s, …, t)`, its length is `L(P) = Σ w(u,v)` over the edges in the path. We seek `P*` with minimum `L(P)` among paths from `s` to `t` in the loaded graph. Restricting graph size or access changes the set of candidate paths.
+For walking, edge weights are metres and `L(P) = Σ w(u,v)` is minimised. For bus/metro, a virtual origin connects to stop vertices with mapped walking access, then a pre-boarding layer connects to a riding layer through an actual service edge. A virtual target connects through another mapped walking access path. This forces at least one ride. Edge weights are estimated minutes, so Dijkstra minimises the complete journey time within the selected mode. A 4 minute bus or 5 minute metro boarding allowance is included. The displayed route distance sums walking and riding metres; fare uses riding metres only.
 
 The Haversine formula converts latitude/longitude into a great-circle segment length. OSM way geometry is represented by successive nodes, so a curved road contributes multiple short segments instead of one straight landmark-to-landmark line.
 
@@ -35,7 +35,7 @@ reconstruct target → predecessor → … → source, then reverse
 
 **Why this works:** when the minimum tentative vertex `u` is settled, no remaining route through an unsettled vertex can improve its distance. Any such route has a prefix at least as large as `d(u)` and cannot become smaller by adding non-negative weights. Thus each settled distance is final. A target must be settled, not merely discovered, before stopping.
 
-The implementation returns tentative and settled distance records separately. Distances for unsettled vertices at early termination are not claimed to be final. A missing tentative distance means infinity.
+The implementation returns tentative and settled cost records separately (metres for walking, minutes for bus/metro). Distances for unsettled vertices at early termination are not claimed to be final. A missing tentative distance means infinity.
 
 **Complexity:** adjacency lists occupy `O(V + E)` memory. Python's heap uses repeated insertions instead of decrease-key, with at most `O(E)` successful relaxations and queue entries. Time is `O((V + E) log E)` and space is `O(V + E)`. For simple graphs this is commonly written `O((V + E) log V)`.
 
@@ -82,7 +82,7 @@ For a road-routing demonstration without another data request, choose **Saved ro
 
 **Why not use A*?** A* could speed up a geographic search with an admissible heuristic, but this project deliberately demonstrates Dijkstra without a heuristic.
 
-**Is the shortest route always the cheapest?** Not generally. Not necessarily even within one mode: bus transfers can add tickets, and official fares can use fare stages or different network distances. This project minimises distance and then estimates tickets. Cheapest-fare optimisation or combined bus + metro + walking journeys need another graph/state model.
+**Is the shortest route always the cheapest?** Not generally. Not necessarily even within one mode: bus transfers can add tickets, and official fares can use fare stages or different network distances. Walking minimises mapped distance; bus/metro minimise estimated time before ticket estimation. Cheapest-fare optimisation or combined bus + metro + walking journeys need another graph/state model.
 
 **Are landmarks the routing vertices?** Walking vertices are street nodes; bus/metro vertices are stops. Landmark pins select nearby eligible vertices. Access gaps are reported as numbers and are not drawn or treated as navigable links. The small sample graph treats landmark letters as vertices for teaching.
 
@@ -90,7 +90,7 @@ For a road-routing demonstration without another data request, choose **Saved ro
 
 **Does a map itself calculate routes?** No. OSM tiles provide the visual background. The main OpenStreetMap API or a streets-only Overpass query supplies the street data; the Python implementation constructs and searches its own graph.
 
-**What assumptions limit this project?** Approximate destination pins, a bounded street extract, incomplete OSM service coverage, nearest-stop selection, simple access rules, no turn restrictions or live schedules, and reference fare/speed assumptions. Bus/metro connections are reconstructed from ordered stops and connected route geometry. Access walks and platform projection gaps are not routed. Unrouted access gaps are excluded from route totals and from the map polylines. Campuses and heritage sites can restrict entry.
+**What assumptions limit this project?** Approximate destination pins, a bounded street extract, incomplete OSM service coverage, bounded stop access, simple access rules, no turn restrictions or live schedules, and reference fare/speed assumptions. Bus/metro connections are reconstructed from ordered stops and connected route geometry. Access walks are routed along mapped streets; platform projection gaps are not routed. Unrouted access gaps are excluded from route totals and from the map polylines. Campuses and heritage sites can restrict entry.
 
 ## Data-download recovery
 

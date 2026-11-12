@@ -11,8 +11,8 @@ import urllib.request
 from urllib.parse import urlsplit
 
 from destinations import DESTINATIONS
-from routing import Graph, dijkstra, graph_from_osm, nearest_node
-from transit import transit_graph, transit_fare
+from routing import Graph, dijkstra, graph_from_osm, largest_component, nearest_node
+from transit import transit_graph, transit_fare, transit_journey
 from osm_data import BBOX, QUERY, TRANSIT_QUERY, ENDPOINTS, EXPORT_URL, decode_osm, download_sources, merge_payloads
 
 ROOT = Path(__file__).resolve().parent
@@ -127,27 +127,34 @@ def route(body):
     j, end = places[body["end"]]
     if source == "sample":
         u, v, start_gap, end_gap = chr(65+i), chr(65+j), 0, 0
-    else:
-        limit = 450 if mode == "walk" else 1500
-        u, start_gap = nearest_node(graph, [start["lat"], start["lon"]], outgoing=True, max_distance=limit)
-        v, end_gap = nearest_node(graph, [end["lat"], end["lon"]], max_distance=limit)
+    elif mode == "walk":
+        connected = largest_component(graph)
+        u, start_gap = nearest_node(graph, [start["lat"], start["lon"]], outgoing=True,allowed=connected)
+        v, end_gap = nearest_node(graph, [end["lat"], end["lon"]],allowed=connected)
     settings = body.get("fare", {})
     if not isinstance(settings, dict):
         raise ValueError("Fare options must be an object.")
     if settings.get("bus_type", "ordinary") not in {"ordinary", "ac"}:
         raise ValueError("Choose an ordinary or AC bus ticket.")
     ac = settings.get("bus_type", "ordinary") == "ac"
-    result = dijkstra(graph, u, v)
+    if source != 'sample' and mode != 'walk':
+        result = transit_journey(STATE['graphs']['walk'],graph,
+                                 [start['lat'],start['lon']],[end['lat'],end['lon']],mode)
+        start_gap,end_gap=result['start_snap_m'],result['end_snap_m']
+    else:
+        result = dijkstra(graph, u, v)
     if source != "sample" and any(not edge.get("geometry") or len(edge["geometry"]) < 2 for edge in result["edges"]):
         raise ValueError("A mapped segment is missing its road/track geometry. Reimport the OSM extract; no straight-line substitute will be drawn.")
     # A bus change starts a new ticket. Minimise distance, then estimate the fare.
     legs = []
     for edge in result["edges"]:
+        if edge.get('transport',mode) != mode:
+            continue
         service = edge.get("service", "Sample service")
         if not legs or legs[-1]["service"] != service:
             legs.append({"service":service,"distance_m":0})
-        legs[-1]["distance_m"] += edge["weight"]
-    price = sum(transit_fare(leg["distance_m"],mode,ac) for leg in legs) if mode == "bus" else transit_fare(result["distance_m"],mode)
+        legs[-1]["distance_m"] += edge.get('distance_m',edge['weight'])
+    price = sum(transit_fare(leg["distance_m"],mode,ac) for leg in legs) if mode == "bus" else transit_fare(result.get('ride_distance_m',result['distance_m']),mode)
     geometry = []
     for edge in result["edges"]:
         points = edge.get("geometry", [])
@@ -165,10 +172,15 @@ def route(body):
         "coordinate_system": "diagram" if source == "sample" else "wgs84",
         "start_snap_m": start_gap, "end_snap_m": end_gap,
         "fare": price, "fare_settings": {"bus_type":"ac" if ac else "ordinary"}, "legs": legs,
-        "duration_minutes": result["distance_m"] / ({"walk":4.5,"bus":15,"metro":32}[mode] * 1000 / 60),
-        "graph_vertices": len(graph.nodes), "graph_edges": len(graph.edges),
+        "duration_minutes": result.get('duration_minutes',result["distance_m"] / (4.5 * 1000 / 60)),
+        "graph_vertices": result.get('graph_vertices',len(graph.nodes)),
+        "graph_edges": result.get('graph_edges',len(graph.edges)),
         "fetched_at": STATE["fetched_at"] if source != "sample" else None,
     })
+    if result.get('route_graph'):
+        result['route_graph'].update(source=source,coordinate_system='wgs84',
+                                     fetched_at=STATE['fetched_at'],
+                                     available_modes=[m for m,g in STATE['graphs'].items() if g.edges])
     return result
 
 

@@ -99,11 +99,13 @@ class HTTPTests(unittest.TestCase):
             code,data=request('POST','/api/route',{'source':'osm','mode':'bus','start':'metro','end':'arts'})
             self.assertEqual(code,200)
             result=json.loads(data)
-            self.assertEqual(result['path'],['stop:1','stop:3'])
-            self.assertEqual(len(result['geometry']),3)
+            self.assertEqual(result['path'],['__origin__','pre:stop:1','ride:stop:3','__target__'])
+            self.assertIn([28.692,77.212],result['geometry'])
             self.assertEqual(result['fare'],5)
             self.assertEqual(result['legs'][0]['service'],'Synthetic Service')
-            self.assertEqual(len(result['segments']),1)
+            self.assertEqual(len(result['segments']),3)
+            self.assertEqual(result['route_graph']['weight_unit'],'min')
+            self.assertGreater(result['duration_minutes'],0)
         finally:app.STATE.update(previous)
 
 

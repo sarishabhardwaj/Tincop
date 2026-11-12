@@ -1,8 +1,8 @@
 """Synthetic transit fixtures: explicit services, stops, and way geometry."""
 import unittest
 
-from routing import dijkstra
-from transit import transit_graph, transit_fare
+from routing import Graph, dijkstra, haversine, largest_component, nearest_node
+from transit import transit_graph, transit_fare, transit_journey
 
 
 def fixture(mode='bus', reverse=False, missing=False):
@@ -49,6 +49,28 @@ class TransitTests(unittest.TestCase):
             self.assertEqual(transit_fare(distance,'bus',True),ac)
         for distance,expected in [(2000,11),(2001,21),(5001,32),(12001,43),(21001,54),(32001,64)]:
             self.assertEqual(transit_fare(distance,'metro'),expected)
+
+    def test_journey_avoids_isolated_nearest_courtyard_and_walks_on_roads(self):
+        streets=Graph()
+        a=[28.69,77.21];b=[28.691,77.21];c=[28.692,77.21]
+        for key,point in [('a',a),('b',b),('c',c),('courtyard',[28.6925,77.21])]:
+            streets.add_node(key,*point)
+        for u,v in [('a','b'),('b','c')]:
+            for start,end in [(u,v),(v,u)]:
+                streets.add_edge(start,end,haversine(streets.nodes[start],streets.nodes[end]),'Public road')
+                streets.edges[-1]['geometry']=[streets.nodes[start],streets.nodes[end]]
+        destination=[28.6925,77.21]
+        self.assertEqual(nearest_node(streets,destination,max_distance=450)[0],'courtyard')
+        self.assertEqual(nearest_node(streets,destination,max_distance=450,allowed=largest_component(streets))[0],'c')
+        services=Graph()
+        services.add_node('stop:a',*a);services.add_node('stop:b',*b)
+        services.add_edge('stop:a','stop:b',haversine(a,b),'Bus test: A → B',10)
+        services.edges[-1].update(geometry=[a,b],service='test',transport='bus')
+        result=transit_journey(streets,services,a,destination,'bus')
+        self.assertEqual([e['transport'] for e in result['edges']],['walk','bus','walk'])
+        self.assertEqual(result['edges'][-1]['geometry'],[b,c])
+        self.assertGreater(result['end_snap_m'],50)
+        self.assertEqual(result['cost_unit'],'min')
 
 
 if __name__=='__main__':unittest.main()
